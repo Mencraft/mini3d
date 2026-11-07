@@ -9,20 +9,52 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Texture system: `Image` loads PNG/JPEG files or memory, accepts raw RGBA8 pixels, or generates
-  solid, checker, grid and custom (`from_fn`) images.
-- `Scene::add_texture` and `Scene::spawn_textured`; objects have `texture`, `uv_scale` and `uv_offset`.
-- Mipmaps generated on upload (averaged in linear color space), with trilinear and 16× anisotropic filtering.
+- **Physically based lighting**: Cook-Torrance GGX shading with a metallic-roughness `Material`
+  (base color, texture, metallic, roughness, emissive, mirror, UV scale/offset).
+- **Multiple light types**: directional, point and spot lights (`Light`), up to 16 at once, each with
+  color, intensity, range and an on/off switch. Point and spot lights use windowed inverse-square falloff,
+  and spot lights have soft cone edges.
+- **Shadows**: a 2048² shadow map for the first shadow-casting directional light, with a 5×5 PCF
+  soft edge, slope-scaled depth bias and normal offset. `Scene::shadow_center` / `shadow_radius` set the
+  area it covers. Toggle with `Renderer::shadows`.
+- **Reflections**:
+  - Image-based lighting: every surface reflects the environment, blurrier as roughness increases.
+  - Planar mirror: one object (`Material::mirror`) reflects the actual scene, using an extra render pass
+    from a mirrored camera. Toggle with `Renderer::reflections`.
+- **HDR rendering**: the scene renders into a 16-bit float (`Rgba16Float`) 4× MSAA target, then a
+  tonemap pass applies `Renderer::exposure` and an ACES, Reinhard or clamp curve (`Tonemap`).
+- **HDR environments**: `HdrImage` loads Radiance `.hdr` panoramas (or PNG/JPEG) and generates a
+  procedural sky with an HDR sun. It is drawn as the sky and lights the scene. Use
+  `Renderer::set_environment` and `Renderer::environment_intensity`.
+- Emissive materials with values above 1, which stay bright through tone mapping.
+- **Textures**: `Image` loads PNG/JPEG from files or memory, takes raw RGBA8 pixels, or generates
+  solid, checker, grid and custom (`from_fn`) images. Mipmaps are generated on upload (averaged in
+  linear color space) and sampled with trilinear and 16× anisotropic filtering.
 - Texture coordinates on every primitive, oriented so images appear upright and unmirrored.
-- The demo has a checkered ground, textured shapes, and an optional image path argument for the cube and torus.
-- Unit tests for mesh UVs and winding, mipmap generation, and image loading.
+- `Renderer::screenshot` renders a frame offscreen and returns it as an `Image`, and `Image::save` writes it to a file.
+- Demo: sun, orbiting point light with a glowing bulb, and a spotlight. Chrome, gold, copper, plastic and
+  textured shapes on a reflective checkered floor. New keys: `1`/`2`/`3` toggle lights, `H` shadows,
+  `R` reflections, `T` tonemap curve, `-`/`=` exposure, `[`/`]` sky intensity, `P` screenshot.
+  The window title shows the current settings.
+- Command-line options: an image path (texture for the cube), a `.hdr` path (environment),
+  `--screenshot <file>` (save the first frame and quit) and `--keys <chars>` (press keys at startup).
+- Unit tests for mesh UVs and winding, mipmaps, image and HDR loading, the sky generator,
+  and the shadow and mirror matrices.
 
 ### Changed
 
+- `Scene::spawn` now takes a `Material` instead of an RGB color.
 - `Scene::new` now takes `&Renderer`, which it uses to create the default white texture.
-- `Vertex` has a `uv` field, and the shader multiplies each object's color by its texture.
+- `Scene::light_dir` is replaced by `Scene::lights` and `Scene::add_light`.
+- The background is now the environment sky, so `Renderer::clear_color` is gone.
+- `Vertex` has a `uv` field.
+- Shaders moved to `src/engine/shaders/`: `pbr.wgsl`, `shadow.wgsl`, `sky.wgsl` and `tonemap.wgsl`.
 - Sphere, cylinder, cone and torus now go around clockwise when seen from above, so textures
   aren't mirrored. Their geometry is otherwise unchanged.
+
+### Removed
+
+- The Blinn-Phong shader, replaced by the PBR shader.
 
 ## [0.1.0] - 2026-11-07
 

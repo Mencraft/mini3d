@@ -12,7 +12,8 @@ bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 env_logger = "0.11"
 log = "0.4"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "hdr"] }
+half = "2"
 
 [profile.dev.package."*"]
 opt-level = 2

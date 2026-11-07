@@ -24,10 +24,14 @@ impl Image {
     }
 
     /// Decodes PNG or JPEG data already in memory (e.g. from `include_bytes!`).
-    #[allow(dead_code)] // engine API, not used by the demo
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, image::ImageError> {
         let img = image::load_from_memory(bytes)?.to_rgba8();
         Ok(Self::new(img.width(), img.height(), img.into_raw()))
+    }
+
+    /// Saves as PNG (or any format the file extension selects that `image` was built with).
+    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), image::ImageError> {
+        image::save_buffer(path, &self.pixels, self.width, self.height, image::ColorType::Rgba8)
     }
 
     /// Builds an image by calling `f(x, y)` for every pixel.
@@ -95,7 +99,7 @@ impl Image {
     }
 }
 
-fn srgb_to_linear(c: f32) -> f32 {
+pub(crate) fn srgb_to_linear(c: f32) -> f32 {
     if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
 }
 
