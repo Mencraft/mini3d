@@ -1,5 +1,6 @@
-//! wgpu renderer (Metal on macOS): pipeline, depth + MSAA targets, per-object uniforms.
+//! wgpu renderer (Metal on macOS): pipeline, depth + MSAA targets, per-object uniforms, textures.
 
+use super::texture::{self, GpuTexture, Image};
 use super::{camera::OrbitCamera, mesh::Mesh, mesh::Vertex, scene::Scene};
 use glam::{Mat4, Vec3};
 use std::sync::Arc;
@@ -22,6 +23,7 @@ struct CameraUniform {
 pub(crate) struct ObjectUniform {
     pub model: [[f32; 4]; 4],
     pub color: [f32; 4],
+    pub uv_transform: [f32; 4],
 }
 
 pub struct GpuMesh {
@@ -45,6 +47,8 @@ pub struct Renderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     pub(crate) object_layout: wgpu::BindGroupLayout,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     depth_view: wgpu::TextureView,
     msaa_view: wgpu::TextureView,
     pub clear_color: wgpu::Color,
@@ -101,6 +105,40 @@ impl Renderer {
         };
         let camera_layout = uniform_layout("camera layout");
         let object_layout = uniform_layout("object layout");
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("texture layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        // Repeat addressing allows tiling via uv_scale; trilinear + anisotropic keeps
+        // textures sharp on surfaces seen at a grazing angle, like the ground plane.
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("albedo sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            anisotropy_clamp: 16,
+            ..Default::default()
+        });
 
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera"),
@@ -117,7 +155,7 @@ impl Renderer {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline layout"),
-            bind_group_layouts: &[&camera_layout, &object_layout],
+            bind_group_layouts: &[&camera_layout, &object_layout, &texture_layout],
             push_constant_ranges: &[],
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -167,6 +205,8 @@ impl Renderer {
             camera_buffer,
             camera_bind_group,
             object_layout,
+            texture_layout,
+            sampler,
             depth_view,
             msaa_view,
             clear_color: wgpu::Color { r: 0.02, g: 0.025, b: 0.035, a: 1.0 },
@@ -222,6 +262,11 @@ impl Renderer {
         GpuMesh { vertex_buffer, index_buffer, index_count: mesh.indices.len() as u32 }
     }
 
+    /// Uploads an image (with a generated mip chain) so objects can use it.
+    pub fn upload_texture(&self, image: &Image) -> GpuTexture {
+        texture::upload(&self.device, &self.queue, &self.texture_layout, &self.sampler, image)
+    }
+
     pub(crate) fn create_object_gpu(&self) -> ObjectGpu {
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("object"),
@@ -258,7 +303,11 @@ impl Renderer {
         };
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&cam));
         for obj in &scene.objects {
-            let u = ObjectUniform { model: obj.transform.matrix().to_cols_array_2d(), color: obj.color };
+            let u = ObjectUniform {
+                model: obj.transform.matrix().to_cols_array_2d(),
+                color: obj.color,
+                uv_transform: [obj.uv_scale.x, obj.uv_scale.y, obj.uv_offset.x, obj.uv_offset.y],
+            };
             self.queue.write_buffer(&obj.gpu.buffer, 0, bytemuck::bytes_of(&u));
         }
 
@@ -291,6 +340,7 @@ impl Renderer {
             for obj in &scene.objects {
                 let mesh = &scene.meshes[obj.mesh];
                 pass.set_bind_group(1, &obj.gpu.bind_group, &[]);
+                pass.set_bind_group(2, &scene.textures[obj.texture].bind_group, &[]);
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, 0..1);

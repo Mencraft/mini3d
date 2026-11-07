@@ -1,6 +1,6 @@
 mod engine;
 
-use engine::{Mesh, OrbitCamera, Renderer, Scene, Transform};
+use engine::{Image, Mesh, OrbitCamera, Renderer, Scene, Transform};
 use glam::{Quat, Vec3};
 use std::{sync::Arc, time::Instant};
 use winit::{
@@ -26,7 +26,7 @@ struct State {
 impl State {
     fn new(window: Arc<Window>) -> Self {
         let renderer = pollster::block_on(Renderer::new(window.clone()));
-        let mut scene = Scene::new();
+        let mut scene = Scene::new(&renderer);
 
         let cube = scene.add_mesh(&renderer, &Mesh::cube(1.4));
         let sphere = scene.add_mesh(&renderer, &Mesh::sphere(0.8, 48, 32));
@@ -35,20 +35,39 @@ impl State {
         let torus = scene.add_mesh(&renderer, &Mesh::torus(0.7, 0.25, 64, 24));
         let plane = scene.add_mesh(&renderer, &Mesh::plane(14.0, 1));
 
-        scene.spawn(&renderer, plane, Transform::at(Vec3::new(0.0, -0.8, 0.0)), [0.25, 0.27, 0.3]);
+        let checker = scene.add_texture(&renderer, &Image::checker(256, 2, [230; 4], [90, 90, 90, 255]));
+        let grid = scene.add_texture(&renderer, &Image::grid(256, 8, [40, 40, 40, 255], [255; 4]));
+        // An image passed on the command line replaces the grid texture on the cube and torus.
+        let custom = match std::env::args().nth(1) {
+            Some(path) => match Image::from_file(&path) {
+                Ok(img) => scene.add_texture(&renderer, &img),
+                Err(e) => {
+                    log::error!("could not load texture {path}: {e}");
+                    grid
+                }
+            },
+            None => grid,
+        };
+
+        let ground = scene.spawn_textured(&renderer, plane, Transform::at(Vec3::new(0.0, -0.8, 0.0)), checker, [0.35, 0.37, 0.4]);
+        scene.objects[ground].uv_scale = glam::Vec2::splat(7.0);
 
         let shapes = [
-            (cube, [0.90, 0.30, 0.25]),
-            (sphere, [0.25, 0.60, 0.95]),
-            (cylinder, [0.30, 0.80, 0.45]),
-            (cone, [0.95, 0.75, 0.20]),
-            (torus, [0.75, 0.40, 0.90]),
+            (cube, custom, [0.90, 0.30, 0.25], [1.0, 1.0]),
+            (sphere, checker, [0.25, 0.60, 0.95], [8.0, 4.0]),
+            (cylinder, grid, [0.30, 0.80, 0.45], [1.0, 1.0]),
+            (cone, Scene::WHITE_TEXTURE, [0.95, 0.75, 0.20], [1.0, 1.0]),
+            (torus, custom, [0.75, 0.40, 0.90], [4.0, 1.0]),
         ];
         let mut spinning = Vec::new();
-        for (i, (mesh, color)) in shapes.into_iter().enumerate() {
+        for (i, (mesh, texture, color, uv_scale)) in shapes.into_iter().enumerate() {
             let angle = i as f32 / shapes.len() as f32 * std::f32::consts::TAU;
             let pos = Vec3::new(angle.sin() * 3.0, 0.2, angle.cos() * 3.0);
-            spinning.push(scene.spawn(&renderer, mesh, Transform::at(pos), color));
+            // Show a loaded image in its true colors rather than tinted.
+            let color = if texture == custom && custom != grid { [1.0; 3] } else { color };
+            let id = scene.spawn_textured(&renderer, mesh, Transform::at(pos), texture, color);
+            scene.objects[id].uv_scale = uv_scale.into();
+            spinning.push(id);
         }
 
         let camera = OrbitCamera::new(renderer.aspect());

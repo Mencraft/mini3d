@@ -7,20 +7,26 @@ struct Camera {
 struct Object {
     model: mat4x4<f32>,
     color: vec4<f32>,
+    // xy = UV scale (tiling), zw = UV offset.
+    uv_transform: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(1) @binding(0) var<uniform> object: Object;
+@group(2) @binding(0) var t_albedo: texture_2d<f32>;
+@group(2) @binding(1) var s_albedo: sampler;
 
 struct VsIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
 };
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world_pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
 };
 
 @vertex
@@ -31,6 +37,7 @@ fn vs_main(in: VsIn) -> VsOut {
     out.world_pos = world.xyz;
     // Valid for rotations + uniform scale, which is all the engine uses.
     out.normal = (object.model * vec4<f32>(in.normal, 0.0)).xyz;
+    out.uv = in.uv * object.uv_transform.xy + object.uv_transform.zw;
     return out;
 }
 
@@ -47,7 +54,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Cool sky-colored fill from above so shadowed sides aren't flat.
     let hemi = mix(vec3<f32>(0.08, 0.07, 0.06), vec3<f32>(0.15, 0.18, 0.25), n.y * 0.5 + 0.5);
 
-    let base = object.color.rgb;
+    // The texture is sRGB, so sampling returns linear values; the color acts as a tint.
+    let base = object.color.rgb * textureSample(t_albedo, s_albedo, in.uv).rgb;
     let color = base * (ambient + diffuse * 0.85) + hemi * base + vec3<f32>(specular);
     return vec4<f32>(color, 1.0);
 }
