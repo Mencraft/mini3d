@@ -1,6 +1,3 @@
-//! The engine is written as a reusable library; the demo in main.rs does not use every API.
-#![allow(dead_code, unused_imports)]
-
 pub mod camera;
 pub mod environment;
 pub mod light;

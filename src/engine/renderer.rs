@@ -178,7 +178,8 @@ impl Targets {
 }
 
 pub struct Renderer {
-    surface: wgpu::Surface<'static>,
+    /// `None` for a headless renderer (tests, offline rendering).
+    surface: Option<wgpu::Surface<'static>>,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -329,13 +330,6 @@ impl Renderer {
             })
             .await
             .expect("no suitable GPU adapter");
-        log::info!("Using adapter: {:?}", adapter.get_info());
-
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
-            .await
-            .expect("request device");
-
         let caps = surface.get_capabilities(&adapter);
         let format = caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
@@ -348,7 +342,53 @@ impl Renderer {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        surface.configure(&device, &config);
+        Self::init(adapter, Some(surface), config).await
+    }
+
+    /// A renderer without a window, for tests and offline rendering. Draw with
+    /// [`Renderer::screenshot`]. Returns `None` if the machine has no usable GPU.
+    pub async fn headless(width: u32, height: u32) -> Option<Self> {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .await
+            .ok()?;
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            width: width.max(1),
+            height: height.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        Some(Self::init(adapter, None, config).await)
+    }
+
+    /// The GPU device, e.g. for `push_error_scope` in tests.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    async fn init(adapter: wgpu::Adapter, surface: Option<wgpu::Surface<'static>>, config: wgpu::SurfaceConfiguration) -> Self {
+        log::info!("Using adapter: {:?}", adapter.get_info());
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor::default())
+            .await
+            .expect("request device");
+        if let Some(surface) = &surface {
+            surface.configure(&device, &config);
+        }
+        let format = config.format;
 
         // ---- layouts
         use wgpu::SamplerBindingType as S;
@@ -643,7 +683,9 @@ impl Renderer {
         }
         self.config.width = width;
         self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.config);
+        }
         self.targets = Targets::new(&self.device, width, height);
         self.main_view.bind_group = view_bind_group(
             &self.device,
@@ -751,11 +793,13 @@ impl Renderer {
         shadow.map(|s| s.1)
     }
 
+    /// Draws a frame to the window. Does nothing for a headless renderer; use `screenshot`.
     pub fn render(&mut self, scene: &Scene, camera: &OrbitCamera) {
-        let frame = match self.surface.get_current_texture() {
+        let Some(surface) = &self.surface else { return };
+        let frame = match surface.get_current_texture() {
             Ok(f) => f,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                self.surface.configure(&self.device, &self.config);
+                surface.configure(&self.device, &self.config);
                 return;
             }
             Err(e) => {

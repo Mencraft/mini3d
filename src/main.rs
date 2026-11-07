@@ -1,4 +1,4 @@
-mod engine;
+use mini3d::engine;
 
 use engine::{HdrImage, Image, Light, Material, Mesh, OrbitCamera, Renderer, Scene, Transform};
 use glam::{Quat, Vec3};

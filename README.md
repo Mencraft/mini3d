@@ -92,8 +92,11 @@ Passes 1 and 2 are skipped when shadows or reflections are off, or when nothing 
 ## Project layout
 
 ```text
+tests/
+└── render.rs              End-to-end GPU rendering tests
 src/
-├── main.rs                Demo scene, input handling, command line
+├── lib.rs                 Library entry point (the engine)
+├── main.rs                Demo app: scene, input handling, command line
 └── engine/
     ├── mod.rs             Public re-exports
     ├── renderer.rs        wgpu setup, pipelines, render passes, screenshots, Transform
@@ -217,11 +220,36 @@ seen from outside.
 ## Testing
 
 ```sh
-cargo test
+cargo test --release
 ```
 
-The unit tests cover mesh generation (UV range, winding, orientation), mipmaps, PNG and HDR loading,
-the procedural sky, and the shadow and mirror matrices. To check rendering, use `--screenshot` and look at the result.
+There are two kinds of tests:
+
+- **Unit tests** (in each `src/engine/*.rs` file) check the math and data without a GPU: mesh
+  winding and UVs, mipmaps, PNG and HDR loading, the sky generator, light constructors, and the
+  shadow and mirror matrices.
+- **End-to-end tests** ([tests/render.rs](tests/render.rs)) render small scenes on the GPU without a
+  window, then check pixels at the screen positions of known 3D points. They cover lights (on/off,
+  direction, falloff, range, spot cone and aim, color), shadows (position, toggling, no acne),
+  reflections (mirror floor, underside of objects, clipping, metal tinting), HDR (tone curves,
+  exposure, very bright values), textures, every primitive from six angles, and GPU validation errors.
+
+The end-to-end tests check behavior, such as "the floor behind the cube is darker than the floor in
+the sun", rather than comparing against reference images. This keeps them stable across GPUs. On a
+machine without a GPU, they print a message and pass.
+
+To run one test, or see its log output:
+
+```sh
+cargo test --release --test render shadow          # tests with "shadow" in the name
+RUST_LOG=debug cargo test --release --test render -- --nocapture
+```
+
+The tests were checked against four deliberately planted bugs, one at a time. Each made at least
+one test fail: a flipped light direction (9 failures), a missing mirror clip plane, ignored shadows, and
+wrong face culling in the reflection pass.
+
+For your own tests, use `Renderer::headless(width, height)` and `renderer.screenshot(&scene, &camera)`.
 
 ## Limitations
 

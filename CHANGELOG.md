@@ -38,8 +38,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   The window title shows the current settings.
 - Command-line options: an image path (texture for the cube), a `.hdr` path (environment),
   `--screenshot <file>` (save the first frame and quit) and `--keys <chars>` (press keys at startup).
-- Unit tests for mesh UVs and winding, mipmaps, image and HDR loading, the sky generator,
-  and the shadow and mirror matrices.
+- `Renderer::headless(width, height)` renders without a window, for tests and offline rendering.
+  `Renderer::device()` and `Renderer::size()` are new accessors.
+- The engine is now a library (`mini3d::engine`) and the demo is a binary that uses it, so tests and
+  other programs can import the engine.
+- 31 end-to-end GPU tests in `tests/render.rs` that render scenes headless and check pixels. They cover
+  lights, shadows, reflections, HDR, textures, culling of every primitive, and GPU validation errors.
+- Unit tests for mesh UVs and winding, mipmaps, image and HDR loading, the sky generator, lights,
+  and the shadow and mirror matrices (21 in total).
 
 ### Changed
 

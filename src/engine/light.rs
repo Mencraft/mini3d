@@ -82,3 +82,62 @@ impl Light {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_lights_are_enabled_without_shadows() {
+        for light in [
+            Light::directional(-Vec3::Y, [1.0; 3], 1.0),
+            Light::point(Vec3::ZERO, [1.0; 3], 1.0, 5.0),
+            Light::spot(Vec3::ZERO, -Vec3::Y, [1.0; 3], 1.0, 5.0, 10.0, 20.0),
+        ] {
+            assert!(light.enabled);
+            assert!(!light.cast_shadows);
+            assert!(light.with_shadows().cast_shadows);
+        }
+    }
+
+    #[test]
+    fn spot_angles_are_stored_in_radians() {
+        let light = Light::spot(Vec3::ZERO, -Vec3::Y, [1.0; 3], 1.0, 5.0, 10.0, 20.0);
+        let LightKind::Spot { inner_angle, outer_angle, .. } = light.kind else { panic!("not a spot") };
+        assert!((inner_angle - 10f32.to_radians()).abs() < 1e-6);
+        assert!((outer_angle - 20f32.to_radians()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn spot_outer_angle_is_always_wider_than_inner() {
+        // Equal or reversed angles would make the shader's smoothstep divide by zero or invert.
+        for (inner, outer) in [(20.0, 20.0), (30.0, 10.0)] {
+            let light = Light::spot(Vec3::ZERO, -Vec3::Y, [1.0; 3], 1.0, 5.0, inner, outer);
+            let LightKind::Spot { inner_angle, outer_angle, .. } = light.kind else { panic!("not a spot") };
+            assert!(outer_angle > inner_angle, "inner {inner}, outer {outer}");
+        }
+    }
+
+    #[test]
+    fn set_position_moves_point_and_spot_lights_only() {
+        let target = Vec3::new(1.0, 2.0, 3.0);
+        let mut point = Light::point(Vec3::ZERO, [1.0; 3], 1.0, 5.0);
+        let mut spot = Light::spot(Vec3::ZERO, -Vec3::Y, [1.0; 3], 1.0, 5.0, 10.0, 20.0);
+        let mut sun = Light::directional(-Vec3::Y, [1.0; 3], 1.0);
+        let sun_before = sun;
+        point.set_position(target);
+        spot.set_position(target);
+        sun.set_position(target);
+        assert_eq!(point.position(), Some(target));
+        assert_eq!(spot.position(), Some(target));
+        assert_eq!(sun.position(), None);
+        assert_eq!(sun, sun_before);
+    }
+
+    #[test]
+    fn color_is_kept_separate_from_intensity() {
+        let light = Light::point(Vec3::ZERO, [0.5, 0.25, 1.0], 20.0, 5.0);
+        assert_eq!(light.color, Vec3::new(0.5, 0.25, 1.0));
+        assert_eq!(light.intensity, 20.0);
+    }
+}
